@@ -30,7 +30,7 @@ app.post('/guardar', async (req, res) => {
     const fechaHora = moment().tz('America/Lima').format('YYYY-MM-DD HH:mm:ss');
 
     // Guardar en la base de datos en el esquema IOT
-    const query = 'INSERT INTO "public".sensores (sensor_id, valor, fecha_hora) VALUES ($1, $2, $3, $4)';
+    const query = 'INSERT INTO "public".sensores (sensor_id, valor, fecha_hora) VALUES ($1, $2, $3)';
     await pool.query(query, [sensor_id, valor, fechaHora]);
 
     console.log(`Sensor ID: ${sensor_id}, Valor: ${valor}, Fecha y Hora: ${fechaHora}`);
@@ -56,7 +56,7 @@ app.post('/reporte-temperatura', async (req, res) => {
         EXTRACT(MINUTE FROM fecha_hora) AS minuto,
         valor,
         ROW_NUMBER() OVER(ORDER BY fecha_hora) AS rn
-      FROM "IOT".sensores
+      FROM "public".sensores
       WHERE fecha_hora BETWEEN $1 AND $2
       ORDER BY fecha_hora
       LIMIT 1;
