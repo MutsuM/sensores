@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Generar Reporte de Temperatura</title>
+</head>
+<body>
+  <h1>Generar Reporte de Temperatura</h1>
+
+  <label for="fechaInicio">Fecha Inicio:</label>
+  <input type="date" id="fechaInicio"><br><br>
+
+  <label for="fechaFin">Fecha Fin:</label>
+  <input type="date" id="fechaFin"><br><br>
+
+  <button onclick="generarReporte()">Generar Reporte</button>
+
+  <script>
+    function generarReporte() {
+      const fechaInicio = document.getElementById('fechaInicio').value;
+      const fechaFin = document.getElementById('fechaFin').value;
+
+      if (!fechaInicio || !fechaFin) {
+        alert("Por favor, selecciona ambas fechas.");
+        return;
+      }
+
+      const data = {
+        fechaInicio: fechaInicio + 'T00:00:00Z', // Ajuste para incluir toda la fecha
+        fechaFin: fechaFin + 'T23:59:59Z'
+      };
+
+      //fetch('http://167.88.43.130:4100/reporte-temperatura', {
+	  fetch('http://localhost:3000/reporte-temperatura', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(data)
+      })
+      .then(response => {
+        if (!response.ok) {
+          throw new Error("Error al generar el reporte.");
+        }
+        return response.blob();
+      })
+      .then(blob => {
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `reporte-temperatura_${fechaInicio}_al_${fechaFin}.xlsx`;
+        a.click();
+        window.URL.revokeObjectURL(url);
+      })
+      .catch(error => console.error('Error:', error));
+    }
+  </script>
+</body>
+</html>

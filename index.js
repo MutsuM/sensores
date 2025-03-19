@@ -45,7 +45,7 @@ app.post('/guardar', async (req, res) => {
 
 // ... (resto de tus imports y configuración)
 
-app.post('/reporte-temperatura', async (req, res) => {
+app.post('/reporte-temperatura2', async (req, res) => {
   const { horaInicio1, horaFin1, horaInicio2, horaFin2 } = req.body;
 
   try {
@@ -90,6 +90,67 @@ app.post('/reporte-temperatura', async (req, res) => {
     res.status(500).json({ error: 'Error al generar el reporte.' });
   }
 });
+
+
+
+
+const exceljs = require('exceljs');
+
+app.post('/reporte-temperatura', async (req, res) => {
+  try {
+    const query = `
+      SELECT 
+        DATE(fecha_hora) AS fecha,
+        CASE 
+          WHEN EXTRACT(HOUR FROM fecha_hora) BETWEEN 8 AND 10 THEN 'M'
+          WHEN EXTRACT(HOUR FROM fecha_hora) BETWEEN 15 AND 17 THEN 'T'
+        END AS turno,
+        TO_CHAR(fecha_hora, 'HH24:MI') AS hora,
+        valor
+      FROM "public".sensores
+      WHERE EXTRACT(HOUR FROM fecha_hora) BETWEEN 8 AND 10
+         OR EXTRACT(HOUR FROM fecha_hora) BETWEEN 15 AND 17
+      ORDER BY fecha_hora;
+    `;
+
+    const result = await pool.query(query);
+    const data = result.rows;
+
+    const workbook = new exceljs.Workbook();
+    const worksheet = workbook.addWorksheet('Reporte de Temperatura');
+
+    // Encabezados
+    worksheet.addRow(['Fecha', 'Turno', 'Hora', 'Temperatura']);
+
+    let currentDate = null;
+    let startRow = 2; // Primera fila de datos después del encabezado
+
+    data.forEach((row, index) => {
+      if (row.fecha !== currentDate) {
+        if (currentDate !== null) {
+          // Fusionar la celda de la fecha para dos filas (mañana y tarde)
+          worksheet.mergeCells(`A${startRow}:A${startRow + 1}`);
+        }
+        currentDate = row.fecha;
+        startRow = index + 2; // Ajuste por encabezado
+      }
+      worksheet.addRow([row.fecha, row.turno, `Hora: ${row.hora}`, row.valor]);
+    });
+
+    // Última fusión de celdas
+    worksheet.mergeCells(`A${startRow}:A${startRow + 1}`);
+
+    const excelBuffer = await workbook.xlsx.writeBuffer();
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename=reporte-temperatura.xlsx');
+    res.send(excelBuffer);
+
+  } catch (error) {
+    console.error('Error al generar el reporte:', error);
+    res.status(500).json({ error: 'Error al generar el reporte.' });
+  }
+});
+
 
 // ... (resto de tu código)
 
