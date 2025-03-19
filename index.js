@@ -20,7 +20,7 @@ app.use(cors()); // Habilitar CORS para todas las rutas
 app.use(express.json());
 
 // Ruta para recibir los datos de Home Assistant y guardarlos en PostgreSQL
-app.post('/guardar', async (req, res) => {
+app.post('/guardarsingle', async (req, res) => {
   try {
     const { sensor_id, valor } = req.body;
     if (!sensor_id || !valor ) {
@@ -40,6 +40,42 @@ app.post('/guardar', async (req, res) => {
     res.status(500).json({ error: 'Error en el servidor' });
   }
 });
+
+app.post('/guardar', async (req, res) => {
+  try {
+    const datos = req.body;
+    if (!Array.isArray(datos) || datos.length === 0) {
+      return res.status(400).json({ error: 'Se requiere un array de datos' });
+    }
+
+    const fechaHora = moment().tz('America/Lima').format('YYYY-MM-DD HH:mm:ss');
+    const query = 'INSERT INTO "public".sensores (sensor_id, valor, fecha_hora) VALUES ($1, $2, $3)';
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      for (const { sensor_id, valor } of datos) {
+        if (!sensor_id || valor === undefined) {
+          return res.status(400).json({ error: 'Faltan datos en algunos registros' });
+        }
+        await client.query(query, [sensor_id, valor, fechaHora]);
+      }
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+
+    console.log(`Datos guardados correctamente para ${datos.length} registros.`);
+    res.json({ message: 'Datos guardados correctamente' });
+  } catch (err) {
+    console.error('Error procesando datos:', err);
+    res.status(500).json({ error: 'Error en el servidor' });
+  }
+});
+
 
 // ... (resto de tus imports y configuración)
 
@@ -96,50 +132,58 @@ app.post('/reporte-temperatura2', async (req, res) => {
 
 
 
+
+
+
 app.post('/reporte-temperatura', async (req, res) => {
+  const { fechaInicio, fechaFin } = req.body;
+
   try {
     const query = `
-      SELECT 
-        DATE(fecha_hora) AS fecha,
-        CASE 
-          WHEN EXTRACT(HOUR FROM fecha_hora) BETWEEN 8 AND 10 THEN 'M'
-          WHEN EXTRACT(HOUR FROM fecha_hora) BETWEEN 15 AND 17 THEN 'T'
-        END AS turno,
-        TO_CHAR(fecha_hora, 'HH24:MI') AS hora,
-        valor
-      FROM "public".sensores
-      WHERE EXTRACT(HOUR FROM fecha_hora) BETWEEN 8 AND 10
-         OR EXTRACT(HOUR FROM fecha_hora) BETWEEN 15 AND 17
-      ORDER BY fecha_hora;
+      SELECT fecha, turno, hora, valor FROM (
+        SELECT 
+          DATE(fecha_hora) AS fecha,
+          CASE 
+            WHEN EXTRACT(HOUR FROM fecha_hora) BETWEEN 8 AND 10 THEN 'M'
+            WHEN EXTRACT(HOUR FROM fecha_hora) BETWEEN 15 AND 17 THEN 'T'
+          END AS turno,
+          TO_CHAR(fecha_hora, 'HH24:MI') AS hora,
+          valor,
+          ROW_NUMBER() OVER(PARTITION BY DATE(fecha_hora), 
+                                       CASE 
+                                         WHEN EXTRACT(HOUR FROM fecha_hora) BETWEEN 8 AND 10 THEN 'M' 
+                                         ELSE 'T' 
+                                       END 
+                          ORDER BY fecha_hora) AS rn
+        FROM "public".sensores
+        WHERE fecha_hora BETWEEN $1 AND $2
+      ) t
+      WHERE rn = 1
+      ORDER BY fecha, turno;
     `;
 
-    const result = await pool.query(query);
+    const values = [fechaInicio, fechaFin];
+    const result = await pool.query(query, values);
     const data = result.rows;
 
+    // Crear archivo Excel
     const workbook = new exceljs.Workbook();
     const worksheet = workbook.addWorksheet('Reporte de Temperatura');
 
     // Encabezados
     worksheet.addRow(['Fecha', 'Turno', 'Hora', 'Temperatura']);
 
-    let currentDate = null;
-    let startRow = 2; // Primera fila de datos después del encabezado
-
-    data.forEach((row, index) => {
-      if (row.fecha !== currentDate) {
-        if (currentDate !== null) {
-          // Fusionar la celda de la fecha para dos filas (mañana y tarde)
-          worksheet.mergeCells(`A${startRow}:A${startRow + 1}`);
-        }
-        currentDate = row.fecha;
-        startRow = index + 2; // Ajuste por encabezado
-      }
-      worksheet.addRow([row.fecha, row.turno, `Hora: ${row.hora}`, row.valor]);
+    // Agregar datos
+    data.forEach(row => {
+      worksheet.addRow([
+        row.fecha,
+        row.turno,
+        `Hora: ${row.hora}`,
+        row.valor
+      ]);
     });
 
-    // Última fusión de celdas
-    worksheet.mergeCells(`A${startRow}:A${startRow + 1}`);
-
+    // Enviar archivo
     const excelBuffer = await workbook.xlsx.writeBuffer();
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', 'attachment; filename=reporte-temperatura.xlsx');
@@ -150,6 +194,7 @@ app.post('/reporte-temperatura', async (req, res) => {
     res.status(500).json({ error: 'Error al generar el reporte.' });
   }
 });
+
 
 
 // ... (resto de tu código)
