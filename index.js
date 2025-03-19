@@ -94,7 +94,7 @@ app.post('/reporte-temperatura2', async (req, res) => {
 
 
 
-const exceljs = require('exceljs');
+
 
 app.post('/reporte-temperatura', async (req, res) => {
   try {
